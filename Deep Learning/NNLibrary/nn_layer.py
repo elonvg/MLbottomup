@@ -16,6 +16,10 @@ class LinearLayer():
         self.dW = self.x.T @ r_grad # Shape: [in_dim, out_dim]
         self.dB = np.sum(r_grad, axis=0) # Sum over all batches
         return r_grad @ self.W.T # Shape: [batch_size, in_dim]
+    
+    def update(self, lr):
+        self.W -= self.dW * lr
+        self.B -= self.dB * lr
 
 
 class ConvLayer():
@@ -66,4 +70,8 @@ class ConvLayer():
         self.dB = np.sum(r_grad, axis=(0, 2, 3)) # Shape: [out_channels]
 
         return local_grad # Shape: [batch_size, x_channeles, x_rows, x_cols]
+    
+    def update(self, lr):
+        self.kernel -= self.dK * lr
+        self.bias -= self.dB * lr
 

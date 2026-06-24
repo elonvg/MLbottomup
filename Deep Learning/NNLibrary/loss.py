@@ -1,14 +1,14 @@
 import numpy as np
 
 class BinaryCrossEntropy():
-    def forward(self, Y, O):
-        self.Y = Y
-        self.O = O
-        N = len(Y)
-        self.out = -np.sum(Y * np.log(O) + (1 - Y) * np.log(1 - O)) / N
+    def forward(self, o, y):
+        self.y = y
+        self.o = o
+        N = len(y)
+        self.out = -np.sum(y * np.log(o) + (1 - y) * np.log(1 - o)) / N
         return self.out
     
     def backward(self):
-        N = len(self.Y)
-        local_grad = - (self.Y / self.O - (1 - self.Y) / (1 - self.O)) / N
+        N = len(self.y)
+        local_grad = - (self.y / self.o - (1 - self.y) / (1 - self.o)) / N
         return local_grad

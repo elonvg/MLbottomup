@@ -43,3 +43,13 @@ class MaxPool():
                             ] += np.where(window == np.max(window), 1, 0) * r_grad[n, k, i, j]
 
         return local_grad # Shape: [batch_size, x_channels, x_rows, x_cols]
+    
+class Flatten():
+    def forward(self, x):
+        self.input_size = x.shape
+        batch_size = x.shape[0]
+        return x.reshape([batch_size, -1])
+    
+    def backward(self, r_grad):
+        return r_grad.reshape(self.input_size)
+
