@@ -21,6 +21,9 @@ class LinearLayer():
         self.W -= self.dW * lr
         self.B -= self.dB * lr
 
+    def count_parameters(self):
+        return self.W.size + self.B.size
+
 
 class ConvLayer():
     def __init__(self, in_channels=1, out_channels=1, kernel_size=3):
@@ -74,4 +77,7 @@ class ConvLayer():
     def update(self, lr):
         self.kernel -= self.dK * lr
         self.bias -= self.dB * lr
+
+    def count_parameters(self):
+        return self.kernel.size + self.bias.size
 
