@@ -1,48 +1,39 @@
 import numpy as np
-
+from numpy.lib.stride_tricks import sliding_window_view
 
 class MaxPool():
-    def __init__(self, size=2, stride=2):
+    def __init__(self, size=2, stride=None):
         self.size = size # Assumes n x n pooling
-        self.stride = stride # Assumes same stride in all directions
+        self.stride = size if stride == None else stride # Assumes same stride in all directions
     
     def forward(self, x):
         self.x = x # Shape: [batch_size, x_channels, x_rows, x_cols]
-        batch_size, x_channels, x_rows, x_cols = x.shape
 
-        fm_rows = (x_rows - self.size) // self.stride + 1
-        fm_cols = (x_cols - self.size) // self.stride + 1
-        feature_maps = np.zeros([batch_size, x_channels, fm_rows, fm_cols])
+        windows = sliding_window_view(x, window_shape=(self.size, self.size), axis=(2, 3))
+        windows = windows[:, :, ::self.stride, ::self.stride, :, :] # Stride
+        
+        feature_maps = np.amax(windows, axis=(4, 5))
 
-        for n in range(batch_size):
-            for k in range(x_channels):
-                for i in range(fm_rows):
-                    for j in range(fm_cols):
-                        row_start = i * self.stride
-                        col_start = j * self.stride
-
-                        window = x[n, k, row_start:row_start+self.size, col_start:col_start+self.size]  
-                        feature_maps[n, k, i, j] = np.max(window)
+        self.max_mask = windows == feature_maps[:, :, :, :, None, None] # Max mask for backprop
 
         return feature_maps # Shape: [batch_size, x_channels, fm_rows, fm_cols]
     
     def backward(self, r_grad):
-        local_grad = np.zeros_like(self.x)
+
         batch_size, fm_channels, fm_rows, fm_cols = r_grad.shape
 
-        for n in range(batch_size):
-            for k in range(fm_channels):
-                for i in range(fm_rows):
-                    for j in range(fm_cols):
-                        row_start = i * self.stride
-                        col_start = j * self.stride
+        local_grad = np.zeros_like(self.x, dtype=np.float32)
 
-                        window = self.x[n, k, row_start:row_start+self.size, col_start:col_start+self.size]
-                        local_grad[
-                            n, k, row_start:row_start+self.size, col_start:col_start+self.size
-                            ] += np.where(window == np.max(window), 1, 0) * r_grad[n, k, i, j]
+        grad_windows = self.max_mask * r_grad[:, :, :, :, None, None]
 
-        return local_grad # Shape: [batch_size, x_channels, x_rows, x_cols]
+        for i in range(fm_rows):
+            for j in range(fm_cols):
+                row_start = i * self.stride
+                col_start = j * self.stride
+                
+                local_grad[:, :, row_start:row_start+self.size, col_start:col_start+self.size] += grad_windows[:, :, i, j, :, :]
+
+        return local_grad# Shape: [batch_size, x_channeles, x_rows, x_cols]
     
 class Flatten():
     def forward(self, x):
