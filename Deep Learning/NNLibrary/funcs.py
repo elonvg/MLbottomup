@@ -5,14 +5,14 @@ def evaluate(network, x):
         x = layer.forward(x)
     return x
 
-def backprop(network, loss_fn, lr):
+def backprop(network, loss_fn, optimizer):
     grad = loss_fn.backward()
     for layer in reversed(network):
         grad = layer.backward(grad)
 
     for layer in network:
-        if hasattr(layer, 'update'):
-            layer.update(lr)
+        for para, grad in layer.paras_grads():
+            optimizer.step(para, grad)
 
 
 def total_parameters(network):

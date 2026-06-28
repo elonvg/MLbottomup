@@ -1,12 +1,19 @@
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
-class LinearLayer():
+class Layer:
+    def paras_grads(self):
+        return []
+
+class LinearLayer(Layer):
     def __init__(self, in_dim, out_dim):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.W = np.random.normal(scale=0.01, size=[in_dim, out_dim])
         self.B = np.zeros(out_dim)
+
+        self.dW = np.zeros_like(self.W, dtype=np.float32)
+        self.dB = np.zeros_like(self.B, dtype=np.float32)
 
     def forward(self, x):
         self.x = x # Shape: [batch_size, in_dim]
@@ -18,22 +25,31 @@ class LinearLayer():
         self.dB = np.sum(r_grad, axis=0) # Sum over all batches
         return r_grad @ self.W.T # Shape: [batch_size, in_dim]
     
-    def update(self, lr):
-        self.W -= self.dW * lr
-        self.B -= self.dB * lr
+    def paras_grads(self):
+        return [
+            (self.W, self.dW),
+            (self.B, self.dB),
+        ]
+    
+    def update(self, optimizer, lr):
+        self.W -= optimizer.step(self.dW, self.dW_prevstep) * lr
+        self.B -= optimizer.step(self.dB, self.dB_prevstep) * lr
 
     def count_parameters(self):
         return self.W.size + self.B.size
 
 
-class ConvLayer():
+class ConvLayer(Layer):
     def __init__(self, in_channels=1, out_channels=1, kernel_size=3):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
         self.kernel_size = kernel_size
-        self.kernel = np.random.normal(size=[out_channels, in_channels, kernel_size, kernel_size]) # Assumes n x n kernel
+        self.kernel = np.random.normal(scale=0.01, size=[out_channels, in_channels, kernel_size, kernel_size]) # Assumes n x n kernel
         self.bias = np.zeros(out_channels)
+
+        self.dK_prev = 0
+        self.dB_prev = 0
     
     def forward(self, x):
         self.x = x # Shape: [batch_size, x_channels, x_rows, x_cols]
@@ -62,9 +78,19 @@ class ConvLayer():
 
         return local_grad# Shape: [batch_size, x_channeles, x_rows, x_cols]
     
-    def update(self, lr):
-        self.kernel -= self.dK * lr
-        self.bias -= self.dB * lr
+    def paras_grads(self):
+        return [
+            (self.kernel, self.dK),
+            (self.bias, self.dB),
+        ]
+
+    def update(self, optimizer, lr):
+        self.kernel -= optimizer.step(self.dK) * lr
+        self.bias -= optimizer.step(self.dB) * lr
+
+
+        # self.kernel -= self.dK * lr
+        # self.bias -= self.dB * lr
 
     def count_parameters(self):
         return self.kernel.size + self.bias.size

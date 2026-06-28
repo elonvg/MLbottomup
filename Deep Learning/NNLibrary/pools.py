@@ -1,7 +1,8 @@
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
+from NNLibrary.layers import Layer
 
-class MaxPool():
+class MaxPool(Layer):
     def __init__(self, size=2, stride=None):
         self.size = size # Assumes n x n pooling
         self.stride = size if stride == None else stride # Assumes same stride in all directions
@@ -35,7 +36,7 @@ class MaxPool():
 
         return local_grad# Shape: [batch_size, x_channeles, x_rows, x_cols]
     
-class Flatten():
+class Flatten(Layer):
     def forward(self, x):
         self.input_size = x.shape
         batch_size = x.shape[0]
