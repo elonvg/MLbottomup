@@ -27,8 +27,7 @@ class LinearLayer(Layer):
         self.record = True
 
     def forward(self, x):
-        # self.x = x # Shape: [batch_size, in_dim]
-        self.record_cache('x', x)
+        self.record_cache('x', x) # Shape: [batch_size, in_dim]
         out = x @ self.W + self.B # Shape: [batch_size, out_dim]
         return out
     
@@ -37,10 +36,6 @@ class LinearLayer(Layer):
         self.dW = x.T @ r_grad # Shape: [in_dim, out_dim]
         self.dB = np.sum(r_grad, axis=0) # Sum over all batches
         return r_grad @ self.W.T # Shape: [batch_size, in_dim]
-
-    # def record_cache(self, key, var):
-    #     if self.record:
-    #         self.cache[key] = var
     
     def paras_grads(self):
         return [
@@ -63,9 +58,12 @@ class ConvLayer(Layer):
 
         self.dK_prev = 0
         self.dB_prev = 0
+
+        self.cache = {}
+        self.record = True
     
     def forward(self, x):
-        self.x = x # Shape: [batch_size, x_channels, x_rows, x_cols]
+        self.record_cache('x', x) # Shape: [batch_size, x_channels, x_rows, x_cols]
 
         windows = sliding_window_view(x, window_shape=(self.kernel_size, self.kernel_size), axis=(2, 3))
 
@@ -75,12 +73,13 @@ class ConvLayer(Layer):
         return self.feature_maps + self.bias[None, :, None, None] # Shape: [batch_size, out_channels, fm_rows, fm_cols]
     
     def backward(self, r_grad):
+        x = self.cache['x']
 
-        batch_size, fm_channels, fm_rows, fm_cols = r_grad.shape
+        _, _, fm_rows, fm_cols = r_grad.shape
 
-        local_grad = np.zeros_like(self.x, dtype=np.float32)
+        local_grad = np.zeros_like(x, dtype=np.float32)
 
-        windows = sliding_window_view(self.x, window_shape=(fm_rows, fm_cols), axis=(2, 3))  
+        windows = sliding_window_view(x, window_shape=(fm_rows, fm_cols), axis=(2, 3))  
         self.dK = np.transpose(np.tensordot(windows, r_grad, axes=([0, 4, 5], [0, 2, 3])), (3, 0, 1, 2)) # Shape: [out_channels, in_channels, kernel_size, kernel_size]
         
         self.dB = np.sum(r_grad, axis=(0, 2, 3)) # Shape: [out_channels]
@@ -96,14 +95,6 @@ class ConvLayer(Layer):
             (self.kernel, self.dK),
             (self.bias, self.dB),
         ]
-
-    def update(self, optimizer, lr):
-        self.kernel -= optimizer.step(self.dK) * lr
-        self.bias -= optimizer.step(self.dB) * lr
-
-
-        # self.kernel -= self.dK * lr
-        # self.bias -= self.dB * lr
 
     def count_parameters(self):
         return self.kernel.size + self.bias.size

@@ -1,31 +1,54 @@
 import numpy as np
+from NNLibrary.Layers.learnable import Layer
 
 def safelog(x, eps=1e-10):
     x_safe = np.array(x, dtype=float)
     x_safe[x_safe <= 0] = eps
     return np.log(x_safe)
 
-class BinaryCrossEntropy():
-    def forward(self, o, y):
-        self.o = o
-        self.y = y
-        self.N = len(y)
-        self.out = -np.sum(y * safelog(o) + (1 - y) * safelog(1 - o)) / self.N
-        return self.out
+class Loss:
+    def __init__(self):
+        pass
+
+    def record_cache(self, key, var, record):
+        if record:
+            self.cache[key] = var
+
+class BinaryCrossEntropy(Loss):
+    def __init__(self):
+        self.cache = {}
+
+    def forward(self, out, y, record=True):
+        self.record_cache('out', out, record)
+        self.record_cache('y', y, record)
+        N = len(y)
+        self.record_cache('N', N, record)
+        loss = -np.sum(y * safelog(out) + (1 - y) * safelog(1 - out)) / N
+        return loss
     
     def backward(self):
-        local_grad = - (self.y / self.o - (1 - self.y) / (1 - self.o)) / self.N
+        out = self.cache['out']
+        y = self.cache['y']
+        N = self.cache['N']
+        local_grad = - (y / out - (1 - y) / (1 - out)) / N
         return local_grad
     
 
-class CrossEntropy():
-    def forward(self, o, y):
-        self.o = o
-        self.y = y
-        self.N = len(y)
-        self.out = -np.sum(y * safelog(o)) / self.N
-        return self.out
+class CrossEntropy(Loss):
+    def __init__(self):
+        self.cache = {}
+
+    def forward(self, out, y, record=True):
+        self.record_cache('out', out, record)
+        self.record_cache('y', y, record)
+        N = len(y)
+        self.record_cache('N', N, record)
+        loss = -np.sum(y * safelog(out)) / N
+        return loss
 
     def backward(self):
-        local_grad = - (self.y / self.o) / self.N
+        out = self.cache['out']
+        y = self.cache['y']
+        N = self.cache['N']
+        local_grad = - (y / out) / N
         return local_grad
