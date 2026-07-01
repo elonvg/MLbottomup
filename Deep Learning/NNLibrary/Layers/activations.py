@@ -1,5 +1,5 @@
 import numpy as np
-from NNLibrary.layers import Layer
+from NNLibrary.Layers.learnable import Layer
 
 class Sigmoid(Layer):
     def forward(self, x):

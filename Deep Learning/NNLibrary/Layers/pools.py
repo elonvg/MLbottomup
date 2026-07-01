@@ -1,6 +1,6 @@
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-from NNLibrary.layers import Layer
+from NNLibrary.Layers.learnable import Layer
 
 class MaxPool(Layer):
     def __init__(self, size=2, stride=None):

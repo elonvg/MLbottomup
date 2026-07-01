@@ -2,6 +2,14 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
 class Layer:
+    def __init__(self):
+        self.cache = {}
+        self.record = True
+
+    def record_cache(self, key, var):
+        if self.record:
+            self.cache[key] = var
+
     def paras_grads(self):
         return []
 
@@ -9,21 +17,30 @@ class LinearLayer(Layer):
     def __init__(self, in_dim, out_dim):
         self.in_dim = in_dim
         self.out_dim = out_dim
-        self.W = np.random.normal(scale=0.01, size=[in_dim, out_dim])
+        self.W = np.random.normal(scale=0.01, size=[in_dim, out_dim]).astype(np.float32)
         self.B = np.zeros(out_dim)
 
         self.dW = np.zeros_like(self.W, dtype=np.float32)
         self.dB = np.zeros_like(self.B, dtype=np.float32)
 
+        self.cache = {}
+        self.record = True
+
     def forward(self, x):
-        self.x = x # Shape: [batch_size, in_dim]
-        self.out = self.x @ self.W + self.B # Shape: [batch_size, out_dim]
-        return self.out
+        # self.x = x # Shape: [batch_size, in_dim]
+        self.record_cache('x', x)
+        out = x @ self.W + self.B # Shape: [batch_size, out_dim]
+        return out
     
     def backward(self, r_grad):
-        self.dW = self.x.T @ r_grad # Shape: [in_dim, out_dim]
+        x = self.cache['x']
+        self.dW = x.T @ r_grad # Shape: [in_dim, out_dim]
         self.dB = np.sum(r_grad, axis=0) # Sum over all batches
         return r_grad @ self.W.T # Shape: [batch_size, in_dim]
+
+    # def record_cache(self, key, var):
+    #     if self.record:
+    #         self.cache[key] = var
     
     def paras_grads(self):
         return [
@@ -31,10 +48,6 @@ class LinearLayer(Layer):
             (self.B, self.dB),
         ]
     
-    def update(self, optimizer, lr):
-        self.W -= optimizer.step(self.dW, self.dW_prevstep) * lr
-        self.B -= optimizer.step(self.dB, self.dB_prevstep) * lr
-
     def count_parameters(self):
         return self.W.size + self.B.size
 
@@ -45,7 +58,7 @@ class ConvLayer(Layer):
         self.out_channels = out_channels
 
         self.kernel_size = kernel_size
-        self.kernel = np.random.normal(scale=0.01, size=[out_channels, in_channels, kernel_size, kernel_size]) # Assumes n x n kernel
+        self.kernel = np.random.normal(scale=0.01, size=[out_channels, in_channels, kernel_size, kernel_size]).astype(np.float32) # Assumes n x n kernel
         self.bias = np.zeros(out_channels)
 
         self.dK_prev = 0

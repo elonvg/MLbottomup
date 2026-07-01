@@ -15,11 +15,3 @@ def backprop(network, loss_fn, optimizer):
             optimizer.step(para, grad)
 
 
-def total_parameters(network):
-    n = 0
-    for layer in network:
-        if hasattr(layer, 'count_parameters'):
-            n += layer.count_parameters()
-    
-    print(f"Total parameter count: {n}")
-    return n
