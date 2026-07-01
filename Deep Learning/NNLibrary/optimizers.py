@@ -61,3 +61,41 @@ class Adam():
         v_tilde = v / (1 - self.gamma ** t)
         
         paras -= m_tilde / (np.sqrt(v_tilde) + self.eps) * self.lr
+
+class AdamW():
+    def __init__(self, lr=0.001, lambda_w=0.1, beta=0.9, gamma=0.999, eps=1e-6):
+        self.lr = lr
+        self.lambda_w = lambda_w
+        self.beta = beta # High beta means to trust long-running averages
+        self.gamma = gamma
+        self.eps = eps
+        self.steps = {}
+
+    def step(self, paras, grads):
+        id_paras = id(paras)
+
+        if id_paras not in self.steps:
+            self.steps[id_paras] = {
+                "m" : np.zeros_like(paras, dtype=np.float32),
+                "v" : np.zeros_like(paras, dtype=np.float32),
+                "t" : 0
+            }
+
+        prev_step = self.steps[id_paras]
+
+        prev_step["t"] += 1
+        t = prev_step["t"]
+        
+        m_prev = prev_step["m"]
+        m = self.beta * m_prev + (1 - self.beta) * grads
+        prev_step["m"] = m
+
+        v_prev = prev_step["v"]
+        v = self.gamma * v_prev + (1 - self.gamma) * grads ** 2
+        prev_step["v"] = v
+
+        # Bias correction
+        m_tilde = m / (1 - self.beta ** t)
+        v_tilde = v / (1 - self.gamma ** t)
+        
+        paras -= (m_tilde / (np.sqrt(v_tilde) + self.eps) + self.lambda_w * paras) * self.lr
