@@ -43,11 +43,33 @@ class MaxPool(Layer):
         return local_grad# Shape: [batch_size, x_channeles, x_rows, x_cols]
     
 class Flatten(Layer):
+    def __init__(self):
+        self.cache = {}
+        self.record = True
+
     def forward(self, x):
-        self.input_size = x.shape
+        self.record_cache('input_size', x.shape)
         batch_size = x.shape[0]
         return x.reshape([batch_size, -1])
     
     def backward(self, r_grad):
-        return r_grad.reshape(self.input_size)
+        input_size = self.cache['input_size']
+        return r_grad.reshape(input_size)
 
+class Dropout(Layer):
+    def __init__(self, p):
+        self.p = p
+
+        self.cache = {}
+        self.record = True
+
+    def forward(self, x):
+        if self.record:
+            mask = np.where(np.random.rand(*x.shape).astype(np.float32) > self.p, 1, 0) / (1 - self.p)
+            self.record_cache('mask', mask)
+            return mask * x
+        return x
+    
+    def backward(self, r_grad):
+        mask = self.cache['mask']
+        return mask * r_grad

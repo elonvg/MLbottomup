@@ -3,10 +3,11 @@ import numpy as np
 class Network():
     def __init__(self, layers):
         self.layers = layers
+        self.record=True
 
-    def forward(self, x, record=True):
+    def forward(self, x):
         for layer in self.layers:
-            layer.record = record
+            layer.record = self.record
             x = layer.forward(x)
         return x
 
@@ -19,6 +20,11 @@ class Network():
             for para, grad in layer.paras_grads():
                 optimizer.step(para, grad)
 
+    def eval(self):
+        self.record = False
+
+    def train(self):
+        self.record = True
 
     def count_parameters(self):
         n = 0
