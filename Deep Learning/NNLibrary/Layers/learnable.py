@@ -18,7 +18,7 @@ class LinearLayer(Layer):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.W = np.random.normal(scale=0.01, size=[in_dim, out_dim]).astype(np.float32)
-        self.B = np.zeros(out_dim)
+        self.B = np.zeros(out_dim).astype(np.float32)
 
         self.dW = np.zeros_like(self.W, dtype=np.float32)
         self.dB = np.zeros_like(self.B, dtype=np.float32)
@@ -54,7 +54,7 @@ class ConvLayer(Layer):
 
         self.kernel_size = kernel_size
         self.kernel = np.random.normal(scale=0.01, size=[out_channels, in_channels, kernel_size, kernel_size]).astype(np.float32) # Assumes n x n kernel
-        self.bias = np.zeros(out_channels)
+        self.bias = np.zeros(out_channels).astype(np.float32)
 
         self.dK_prev = 0
         self.dB_prev = 0
@@ -79,7 +79,7 @@ class ConvLayer(Layer):
 
         local_grad = np.zeros_like(x, dtype=np.float32)
 
-        windows = sliding_window_view(x, window_shape=(fm_rows, fm_cols), axis=(2, 3))  
+        windows = sliding_window_view(x, window_shape=(fm_rows, fm_cols), axis=(2, 3))
         self.dK = np.transpose(np.tensordot(windows, r_grad, axes=([0, 4, 5], [0, 2, 3])), (3, 0, 1, 2)) # Shape: [out_channels, in_channels, kernel_size, kernel_size]
         
         self.dB = np.sum(r_grad, axis=(0, 2, 3)) # Shape: [out_channels]
