@@ -7,6 +7,9 @@ class Layer:
         self.record = True
 
     def record_cache(self, key, var):
+        """
+        Function for recording variables for backprop
+        """
         if self.record:
             self.cache[key] = var
 
@@ -18,7 +21,7 @@ class LinearLayer(Layer):
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.W = np.random.normal(scale=0.01, size=[in_dim, out_dim]).astype(np.float32)
-        self.B = np.zeros(out_dim).astype(np.float32)
+        self.B = np.zeros(out_dim, dtype=np.float32)
 
         self.dW = np.zeros_like(self.W, dtype=np.float32)
         self.dB = np.zeros_like(self.B, dtype=np.float32)
@@ -54,7 +57,7 @@ class ConvLayer(Layer):
 
         self.kernel_size = kernel_size
         self.kernel = np.random.normal(scale=0.01, size=[out_channels, in_channels, kernel_size, kernel_size]).astype(np.float32) # Assumes n x n kernel
-        self.bias = np.zeros(out_channels).astype(np.float32)
+        self.bias = np.zeros(out_channels, dtype=np.float32)
 
         self.dK_prev = 0
         self.dB_prev = 0
@@ -98,4 +101,87 @@ class ConvLayer(Layer):
 
     def count_parameters(self):
         return self.kernel.size + self.bias.size
+    
+class RNN(Layer):
+    def __init__(self, in_dim, hidden_dim, out_dim):
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
+
+        self.W_xh = np.random.normal(scale=2/hidden_dim, size=[in_dim, hidden_dim]).astype(np.float32)
+        self.W_hh = np.random.normal(scale=2/hidden_dim, size=[hidden_dim, hidden_dim]).astype(np.float32)
+        self.W_hout = np.random.normal(scale=2/hidden_dim, size=[hidden_dim, out_dim]).astype(np.float32)
+        self.B_h = np.zeros(hidden_dim, dtype=np.float32)
+        self.B_out = np.zeros(out_dim, dtype=np.float32)
+
+        self.dW_xh = np.zeros_like(self.W_xh, dtype=np.float32)
+        self.dW_hh = np.zeros_like(self.W_hh, dtype=np.float32)
+        self.dW_hout = np.zeros_like(self.W_hout, dtype=np.float32)
+        self.dB_h = np.zeros_like(self.B_h, dtype=np.float32)
+        self.dB_out = np.zeros_like(self.B_out, dtype=np.float32)
+
+        self.cache = {}
+        self.record = True
+
+
+    def forward(self, x):
+        self.record_cache('x', x)
+        batch_size, T, in_dim = x.shape
+
+        # Encode sequence
+        x_encoded = x @ self.W_xh # Shape: [batch_size, T, hidden_dim]
+
+        # Compute hidden states and output
+        hidden_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        outputs = np.zeros((batch_size, T, self.out_dim)).astype(np.float32)
+        for t in range(T):
+            h_prev = hidden_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
+            h = np.tanh(h_prev @ self.W_hh + x_encoded[:, t, :] + self.B_h)
+            hidden_states[:, t, :] = h
+            outputs[:, t, :] = h @ self.W_hout + self.B_out
+        
+        self.record_cache('hidden_states', hidden_states)
+        self.record_cache('outputs', outputs)
+
+        return outputs
+
+    def backward(self, r_grad):
+        x = self.cache['x'] # Shape: [batch_size, T, in_dim]
+        hidden_states = self.cache['hidden_states']
+        batch_size, T, hidden_dim = hidden_states.shape
+
+        local_grad = np.zeros_like(x, dtype=np.float32)
+
+        dydz_tplus1 = np.zeros([batch_size, hidden_dim], dtype=np.float32)
+        for t in reversed(range(T)):
+            h_t = hidden_states[:, t, :]
+            h_tminus1 = hidden_states[:, t-1, :] if t > 0 else np.zeros([batch_size, hidden_dim], dtype=np.float32)
+
+            dydh_t = r_grad[:, t, :] @ self.W_hout.T + dydz_tplus1 @ self.W_hh.T # Shape: [batch_size, hidden_dim]
+            dhdz_t = (1 - h_t**2)
+            dydz_t = dydh_t * dhdz_t # Shape: [batch_size, hidden_dim]
+
+            self.dW_xh += x[:, t, :].T @ dydz_t # Shape: [in_dim, hidden_dim]
+            self.dW_hh += h_tminus1.T @ dydz_t # Shape: [hidden_dim, hidden_dim]
+            self.dB_h += np.sum(dydz_t, axis=0) # Shape: [hidden_dim]
+            self.dW_hout += h_t.T @ r_grad[:, t, :] # Shape: [hidden_dim, out_dim]
+            self.dB_out += np.sum(r_grad[:, t, :], axis=0) # Shape: [out_dim]
+
+            local_grad[:, t, :] = dydz_t @ self.W_xh.T # Shape: [batch_size, in_dim]
+
+            dydz_tplus1 = dydz_t # Carry forward
+
+        return local_grad
+    
+    def paras_grads(self):
+        return [
+            (self.W_xh, self.dW_xh),
+            (self.W_hh, self.dW_hh),
+            (self.B_h, self.dB_h),
+            (self.W_hout, self.dW_hout),
+            (self.B_out, self.dB_out),
+        ]
+
+    def count_parameters(self):
+        return self.W_xh.size + self.W_hh.size + self.B_h.size + self.W_hout.size + self.B_out.size
 

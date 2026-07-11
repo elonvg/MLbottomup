@@ -21,7 +21,7 @@ class BinaryCrossEntropy(Loss):
     def forward(self, out, y, record=True):
         self.record_cache('out', out, record)
         self.record_cache('y', y, record)
-        N = len(y)
+        N = y.size // y.shape[-1]
         self.record_cache('N', N, record)
         loss = -np.sum(y * safelog(out) + (1 - y) * safelog(1 - out)) / N
         return loss
@@ -41,7 +41,7 @@ class CrossEntropy(Loss):
     def forward(self, out, y, record=True):
         self.record_cache('out', out, record)
         self.record_cache('y', y, record)
-        N = len(y)
+        N = y.size // y.shape[-1]
         self.record_cache('N', N, record)
         loss = -np.sum(y * safelog(out)) / N
         return loss
