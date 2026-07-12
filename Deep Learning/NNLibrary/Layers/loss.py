@@ -52,3 +52,30 @@ class CrossEntropy(Loss):
         N = self.cache['N']
         local_grad = - (y / out) / N
         return local_grad
+    
+
+class SoftmaxCE(Loss):
+    def __init__(self, T=1):
+        self.T = T # Temperature
+        self.cache = {}
+
+    def forward(self, x, y, record=True):
+        self.record_cache('y', y, record)
+
+        # Softmax
+        e = np.exp((x - np.max(x)) / self.T) # Numerically stable
+        s = e / np.sum(e, axis=-1, keepdims=True)
+        self.record_cache('s', s, record)
+
+        # Cross Entropy
+        N = y.size // y.shape[-1]
+        self.record_cache('N', N, record)
+
+        return -np.sum(y * safelog(s)) / N
+    
+    def backward(self):
+        s = self.cache['s']
+        y = self.cache['y']
+        N = self.cache['N']
+
+        return (s - y) / N

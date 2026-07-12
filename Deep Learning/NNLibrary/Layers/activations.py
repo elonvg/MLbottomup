@@ -18,18 +18,18 @@ class Sigmoid(Layer):
         return r_grad * local_grad
     
 class Softmax(Layer):
-    def __init__(self):
+    def __init__(self, T=1):
+        self.T = T
         self.cache = {}
         self.record = True
 
     def forward(self, x):
-        x = np.clip(x, -500, 500)
-        e = np.exp(x)
-        out = e / np.sum(e, axis=1, keepdims=True)
+        e = np.exp((x - np.max(x)) / self.T) # Numerically stable
+        out = e / np.sum(e, axis=-1, keepdims=True)
         self.record_cache('out', out)
         return out
 
     def backward(self, r_grad):
         s = self.cache['out']
-        dot = np.sum(r_grad * s, axis=1, keepdims=True)
+        dot = np.sum(r_grad * s, axis=-1, keepdims=True)
         return s * (r_grad - dot)

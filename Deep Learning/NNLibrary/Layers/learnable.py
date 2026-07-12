@@ -150,6 +150,13 @@ class RNN(Layer):
         hidden_states = self.cache['hidden_states']
         batch_size, T, hidden_dim = hidden_states.shape
 
+        # Zero
+        self.dW_xh = np.zeros_like(self.W_xh, dtype=np.float32)
+        self.dW_hh = np.zeros_like(self.W_hh, dtype=np.float32)
+        self.dW_hout = np.zeros_like(self.W_hout, dtype=np.float32)
+        self.dB_h = np.zeros_like(self.B_h, dtype=np.float32)
+        self.dB_out = np.zeros_like(self.B_out, dtype=np.float32)
+
         local_grad = np.zeros_like(x, dtype=np.float32)
 
         dydz_tplus1 = np.zeros([batch_size, hidden_dim], dtype=np.float32)
