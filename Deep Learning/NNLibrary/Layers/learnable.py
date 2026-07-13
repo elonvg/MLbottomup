@@ -14,6 +14,9 @@ class Layer:
             self.cache[key] = var
 
     def paras_grads(self):
+        """
+        Method for returning parameters and gradients
+        """
         return []
 
 class LinearLayer(Layer):
@@ -141,7 +144,6 @@ class RNN(Layer):
             outputs[:, t, :] = h @ self.Wout + self.Bout
         
         self.record_cache('hidden_states', hidden_states)
-        self.record_cache('outputs', outputs)
 
         return outputs
 
@@ -188,12 +190,13 @@ class RNN(Layer):
 
     def count_parameters(self):
         return self.Wx.size + self.Wh.size + self.Bh.size + self.Wout.size + self.Bout.size
-    
-from NNLibrary.Layers.activations import Sigmoid
 
 # TODO:
 # Dont use Layer sigmoid
-# Combine gate weights into one
+
+def _sigmoid(z):
+    z = np.clip(z, -80, 80)
+    return 1/(1+np.exp(-z))
 
 class LSTM(Layer):
     def __init__(self, in_dim, hidden_dim, out_dim):
@@ -202,23 +205,15 @@ class LSTM(Layer):
         self.out_dim = out_dim
 
         D = in_dim + hidden_dim
-        # Forget
-        self.sigmoid_forget = Sigmoid()
-        self.Wf = np.random.normal(scale=np.sqrt(2/D), size=[in_dim + hidden_dim, hidden_dim]).astype(np.float32)
-        self.Bf = np.ones(hidden_dim, dtype=np.float32)
-        # Input / Update
-        self.Wc = np.random.normal(scale=np.sqrt(2/D), size=[in_dim + hidden_dim, hidden_dim]).astype(np.float32)
-        self.Bc = np.zeros(hidden_dim, dtype=np.float32)
-        self.sigmoid_amount = Sigmoid()
-        self.Wm = np.random.normal(scale=np.sqrt(2/D), size=[in_dim + hidden_dim, hidden_dim]).astype(np.float32)
-        self.Bm = np.zeros(hidden_dim, dtype=np.float32)
-        # Output (gate)
-        self.sigmoid_output = Sigmoid()
-        self.Wo = np.random.normal(scale=np.sqrt(2/D), size=[in_dim + hidden_dim, hidden_dim]).astype(np.float32)
-        self.Bo = np.zeros(hidden_dim, dtype=np.float32)
-        # Out
+        self.W = np.random.normal(scale=np.sqrt(2/D), size=[D, 4 * hidden_dim]).astype(np.float32)
+        self.B = np.zeros(4 * hidden_dim, dtype=np.float32)
         self.Wout = np.random.normal(scale=np.sqrt(2/hidden_dim), size=[hidden_dim, out_dim]).astype(np.float32)
         self.Bout = np.zeros(out_dim, dtype=np.float32)
+        
+        self.dW = np.zeros_like(self.W, dtype=np.float32)
+        self.dB = np.zeros_like(self.B, dtype=np.float32)
+        self.dWout = np.zeros_like(self.Wout, dtype=np.float32)
+        self.dBout = np.zeros_like(self.Bout, dtype=np.float32)
 
         self.cache = {}
         self.record = True
@@ -227,6 +222,12 @@ class LSTM(Layer):
         self.record_cache('x', x)
         batch_size, T, in_dim = x.shape
 
+        # Init activations
+        concats = np.zeros((batch_size, T, self.in_dim + self.hidden_dim)).astype(np.float32)
+        forgets = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        candidates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        input_gates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        output_gates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
         # Init hidden states and output
         cell_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
         hidden_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
@@ -235,25 +236,112 @@ class LSTM(Layer):
         for t in range(T):
             C_prev = cell_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
             h_prev = hidden_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
+
             hx = np.concatenate((h_prev, x[:, t, :]), axis=1)
+            concats[:, t, :] = hx
+            z = hx @ self.W + self.B # Shape: [batch_size, 4 * hidden_dim]
+            H = self.hidden_dim
+            zf, zc, zu, zo = z[:, 0:H], z[:, H:2*H], z[:, 2*H:3*H], z[:, 3*H:4*H]
 
-            # Forget
-            forget = self.sigmoid_forget.forward(hx @ self.Wf + self.Bf) # Shape: [batch_size, hidden_dim]
+            # "Forget"
+            forget = _sigmoid(zf)
             Cf = C_prev * forget
+            # Store
+            forgets[:, t, :] = forget
 
-            # Input / Update
-            change = np.tanh(hx @ self.Wc + self.Bc)
-            amount = self.sigmoid_amount.forward(hx @ self.Wm + self.Bm)
-            C = Cf + change * amount
+            # "Input" / Update cell
+            candidate = np.tanh(zc)
+            input_gate = _sigmoid(zu)
+            C = Cf + candidate * input_gate
+            # Store
+            input_gates[:, t, :] = input_gate
+            candidates[:, t, :] = candidate
             cell_states[:, t, :] = C
 
-            # Output (gate)
-            output_gate = self.sigmoid_output.forward(hx @ self.Wo + self.Bo)
+            # "Output" / Compute state
+            output_gate = _sigmoid(zo)
+            output_gates[:, t, :] = output_gate
             h = output_gate * np.tanh(C)
+            # Store
             hidden_states[:, t, :] = h
 
             # Out
             outputs[:, t, :] = h @ self.Wout + self.Bout
 
+        self.record_cache('concats', concats)
+        self.record_cache('forgets', forgets)
+        self.record_cache('candidates', candidates)
+        self.record_cache('input_gates', input_gates)
+        self.record_cache('output_gates', output_gates)
+        self.record_cache('cell_states', cell_states)
+        self.record_cache('hidden_states', hidden_states)
+
         return outputs
+    
+    def backward(self, r_grad):
+        # Fetch
+        x = self.cache['x'] # Shape: [batch_size, T, in_dim]
+        concats = self.cache['concats']
+        forgets = self.cache['forgets']
+        candidates = self.cache['candidates']
+        input_gates = self.cache['input_gates']
+        output_gates = self.cache['output_gates']
+        cell_states = self.cache['cell_states']
+        hidden_states = self.cache['hidden_states']
+
+        batch_size, T, hidden_dim = hidden_states.shape
+
+        # Zero
+        for g in (self.dW, self.dB, self.dWout, self.dBout):
+            g.fill(0)
+
+        local_grad = np.zeros_like(x, dtype=np.float32)
+
+        dC_tplus1 = np.zeros([batch_size, hidden_dim], dtype=np.float32)
+        dh_tplus1 = np.zeros([batch_size, hidden_dim], dtype=np.float32)
+        for t in reversed(range(T)):
+            hx = concats[:, t, :]
+            forget = forgets[:, t, :]
+            candidate = candidates[:, t, :]
+            input_gate = input_gates[:, t, :]
+            output_gate = output_gates[:, t, :]
+            C = cell_states[:, t, :]
+            C_tminus1 = cell_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
+            h = hidden_states[:, t, :]
+
+            dh = r_grad[:, t, :] @ self.Wout.T + dh_tplus1
+            dC = dh * output_gate * (1 - np.tanh(C)**2) + dC_tplus1
+
+            dcandidate = dC * input_gate
+
+            dzf = dC * C_tminus1 * (forget * (1 - forget))
+            dzc = dcandidate * (1 - candidate**2)
+            dzu = dC * candidate * (input_gate * (1 - input_gate))
+            dzo = dh * np.tanh(C) * (output_gate * (1 - output_gate))
+            dz = np.concatenate([dzf, dzc, dzu, dzo], axis=1)
+
+            self.dW += hx.T @ dz
+            self.dB += np.sum(dz, axis=0)
+            self.dWout += h.T @ r_grad[:, t, :]
+            self.dBout += np.sum(r_grad[:, t, :], axis=0)
+
+            dhx = dz @ self.W.T
+            dC_tplus1 = dC * forget
+            dh_tplus1 = dhx[:, :self.hidden_dim]
+
+            local_grad[:, t, :] = dhx[:, self.hidden_dim::]
+
+        return local_grad
+    
+    def paras_grads(self):
+        return [
+            (self.W, self.dW),
+            (self.B, self.dB),
+            (self.Wout, self.dWout),
+            (self.Bout, self.dBout),
+        ]
+
+    def count_parameters(self):
+        return self.W.size + self.B.size + self.Wout.size + self.Bout.size
+
 

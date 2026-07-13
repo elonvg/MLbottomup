@@ -7,7 +7,7 @@ class Sigmoid(Layer):
         self.record = True
 
     def forward(self, x):
-        x = np.clip(x, -500, 500)
+        x = np.clip(x, -80, 80)
         out = 1/(1+np.exp(-x))
         self.record_cache('out', out)
         return out
