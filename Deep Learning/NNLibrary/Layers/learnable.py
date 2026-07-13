@@ -108,17 +108,17 @@ class RNN(Layer):
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
 
-        self.W_xh = np.random.normal(scale=2/hidden_dim, size=[in_dim, hidden_dim]).astype(np.float32)
-        self.W_hh = np.random.normal(scale=2/hidden_dim, size=[hidden_dim, hidden_dim]).astype(np.float32)
-        self.W_hout = np.random.normal(scale=2/hidden_dim, size=[hidden_dim, out_dim]).astype(np.float32)
-        self.B_h = np.zeros(hidden_dim, dtype=np.float32)
-        self.B_out = np.zeros(out_dim, dtype=np.float32)
+        self.Wx = np.random.normal(scale=np.sqrt(2/in_dim), size=[in_dim, hidden_dim]).astype(np.float32)
+        self.Wh = np.random.normal(scale=np.sqrt(2/hidden_dim), size=[hidden_dim, hidden_dim]).astype(np.float32)
+        self.Wout = np.random.normal(scale=np.sqrt(2/hidden_dim), size=[hidden_dim, out_dim]).astype(np.float32)
+        self.Bh = np.zeros(hidden_dim, dtype=np.float32)
+        self.Bout = np.zeros(out_dim, dtype=np.float32)
 
-        self.dW_xh = np.zeros_like(self.W_xh, dtype=np.float32)
-        self.dW_hh = np.zeros_like(self.W_hh, dtype=np.float32)
-        self.dW_hout = np.zeros_like(self.W_hout, dtype=np.float32)
-        self.dB_h = np.zeros_like(self.B_h, dtype=np.float32)
-        self.dB_out = np.zeros_like(self.B_out, dtype=np.float32)
+        self.dWx = np.zeros_like(self.Wx, dtype=np.float32)
+        self.dWh = np.zeros_like(self.Wh, dtype=np.float32)
+        self.dWout = np.zeros_like(self.Wout, dtype=np.float32)
+        self.dBh = np.zeros_like(self.Bh, dtype=np.float32)
+        self.dBout = np.zeros_like(self.Bout, dtype=np.float32)
 
         self.cache = {}
         self.record = True
@@ -129,16 +129,16 @@ class RNN(Layer):
         batch_size, T, in_dim = x.shape
 
         # Encode sequence
-        x_encoded = x @ self.W_xh # Shape: [batch_size, T, hidden_dim]
+        x_encoded = x @ self.Wx # Shape: [batch_size, T, hidden_dim]
 
         # Compute hidden states and output
         hidden_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
         outputs = np.zeros((batch_size, T, self.out_dim)).astype(np.float32)
         for t in range(T):
             h_prev = hidden_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
-            h = np.tanh(h_prev @ self.W_hh + x_encoded[:, t, :] + self.B_h)
+            h = np.tanh(h_prev @ self.Wh + x_encoded[:, t, :] + self.Bh)
             hidden_states[:, t, :] = h
-            outputs[:, t, :] = h @ self.W_hout + self.B_out
+            outputs[:, t, :] = h @ self.Wout + self.Bout
         
         self.record_cache('hidden_states', hidden_states)
         self.record_cache('outputs', outputs)
@@ -151,11 +151,8 @@ class RNN(Layer):
         batch_size, T, hidden_dim = hidden_states.shape
 
         # Zero
-        self.dW_xh = np.zeros_like(self.W_xh, dtype=np.float32)
-        self.dW_hh = np.zeros_like(self.W_hh, dtype=np.float32)
-        self.dW_hout = np.zeros_like(self.W_hout, dtype=np.float32)
-        self.dB_h = np.zeros_like(self.B_h, dtype=np.float32)
-        self.dB_out = np.zeros_like(self.B_out, dtype=np.float32)
+        for g in (self.dWx, self.dWh, self.dWout, self.dBh, self.dBout):
+            g.fill(0)
 
         local_grad = np.zeros_like(x, dtype=np.float32)
 
@@ -164,17 +161,17 @@ class RNN(Layer):
             h_t = hidden_states[:, t, :]
             h_tminus1 = hidden_states[:, t-1, :] if t > 0 else np.zeros([batch_size, hidden_dim], dtype=np.float32)
 
-            dydh_t = r_grad[:, t, :] @ self.W_hout.T + dydz_tplus1 @ self.W_hh.T # Shape: [batch_size, hidden_dim]
+            dydh_t = r_grad[:, t, :] @ self.Wout.T + dydz_tplus1 @ self.Wh.T # Shape: [batch_size, hidden_dim]
             dhdz_t = (1 - h_t**2)
             dydz_t = dydh_t * dhdz_t # Shape: [batch_size, hidden_dim]
 
-            self.dW_xh += x[:, t, :].T @ dydz_t # Shape: [in_dim, hidden_dim]
-            self.dW_hh += h_tminus1.T @ dydz_t # Shape: [hidden_dim, hidden_dim]
-            self.dB_h += np.sum(dydz_t, axis=0) # Shape: [hidden_dim]
-            self.dW_hout += h_t.T @ r_grad[:, t, :] # Shape: [hidden_dim, out_dim]
-            self.dB_out += np.sum(r_grad[:, t, :], axis=0) # Shape: [out_dim]
+            self.dWx += x[:, t, :].T @ dydz_t # Shape: [in_dim, hidden_dim]
+            self.dWh += h_tminus1.T @ dydz_t # Shape: [hidden_dim, hidden_dim]
+            self.dBh += np.sum(dydz_t, axis=0) # Shape: [hidden_dim]
+            self.dWout += h_t.T @ r_grad[:, t, :] # Shape: [hidden_dim, out_dim]
+            self.dBout += np.sum(r_grad[:, t, :], axis=0) # Shape: [out_dim]
 
-            local_grad[:, t, :] = dydz_t @ self.W_xh.T # Shape: [batch_size, in_dim]
+            local_grad[:, t, :] = dydz_t @ self.Wx.T # Shape: [batch_size, in_dim]
 
             dydz_tplus1 = dydz_t # Carry forward
 
@@ -182,13 +179,81 @@ class RNN(Layer):
     
     def paras_grads(self):
         return [
-            (self.W_xh, self.dW_xh),
-            (self.W_hh, self.dW_hh),
-            (self.B_h, self.dB_h),
-            (self.W_hout, self.dW_hout),
-            (self.B_out, self.dB_out),
+            (self.Wx, self.dWx),
+            (self.Wh, self.dWh),
+            (self.Bh, self.dBh),
+            (self.Wout, self.dWout),
+            (self.Bout, self.dBout),
         ]
 
     def count_parameters(self):
-        return self.W_xh.size + self.W_hh.size + self.B_h.size + self.W_hout.size + self.B_out.size
+        return self.Wx.size + self.Wh.size + self.Bh.size + self.Wout.size + self.Bout.size
+    
+from NNLibrary.Layers.activations import Sigmoid
+
+# TODO:
+# Dont use Layer sigmoid
+# Combine gate weights into one
+
+class LSTM(Layer):
+    def __init__(self, in_dim, hidden_dim, out_dim):
+        self.in_dim = in_dim
+        self.hidden_dim = hidden_dim
+        self.out_dim = out_dim
+
+        D = in_dim + hidden_dim
+        # Forget
+        self.sigmoid_forget = Sigmoid()
+        self.Wf = np.random.normal(scale=np.sqrt(2/D), size=[in_dim + hidden_dim, hidden_dim]).astype(np.float32)
+        self.Bf = np.ones(hidden_dim, dtype=np.float32)
+        # Input / Update
+        self.Wc = np.random.normal(scale=np.sqrt(2/D), size=[in_dim + hidden_dim, hidden_dim]).astype(np.float32)
+        self.Bc = np.zeros(hidden_dim, dtype=np.float32)
+        self.sigmoid_amount = Sigmoid()
+        self.Wm = np.random.normal(scale=np.sqrt(2/D), size=[in_dim + hidden_dim, hidden_dim]).astype(np.float32)
+        self.Bm = np.zeros(hidden_dim, dtype=np.float32)
+        # Output (gate)
+        self.sigmoid_output = Sigmoid()
+        self.Wo = np.random.normal(scale=np.sqrt(2/D), size=[in_dim + hidden_dim, hidden_dim]).astype(np.float32)
+        self.Bo = np.zeros(hidden_dim, dtype=np.float32)
+        # Out
+        self.Wout = np.random.normal(scale=np.sqrt(2/hidden_dim), size=[hidden_dim, out_dim]).astype(np.float32)
+        self.Bout = np.zeros(out_dim, dtype=np.float32)
+
+        self.cache = {}
+        self.record = True
+
+    def forward(self, x):
+        self.record_cache('x', x)
+        batch_size, T, in_dim = x.shape
+
+        # Init hidden states and output
+        cell_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        hidden_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        outputs = np.zeros((batch_size, T, self.out_dim)).astype(np.float32)
+
+        for t in range(T):
+            C_prev = cell_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
+            h_prev = hidden_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
+            hx = np.concatenate((h_prev, x[:, t, :]), axis=1)
+
+            # Forget
+            forget = self.sigmoid_forget.forward(hx @ self.Wf + self.Bf) # Shape: [batch_size, hidden_dim]
+            Cf = C_prev * forget
+
+            # Input / Update
+            change = np.tanh(hx @ self.Wc + self.Bc)
+            amount = self.sigmoid_amount.forward(hx @ self.Wm + self.Bm)
+            C = Cf + change * amount
+            cell_states[:, t, :] = C
+
+            # Output (gate)
+            output_gate = self.sigmoid_output.forward(hx @ self.Wo + self.Bo)
+            h = output_gate * np.tanh(C)
+            hidden_states[:, t, :] = h
+
+            # Out
+            outputs[:, t, :] = h @ self.Wout + self.Bout
+
+        return outputs
 
