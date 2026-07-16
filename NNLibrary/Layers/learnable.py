@@ -23,7 +23,7 @@ class LinearLayer(Layer):
     def __init__(self, in_dim, out_dim):
         self.in_dim = in_dim
         self.out_dim = out_dim
-        self.W = np.random.normal(scale=0.01, size=[in_dim, out_dim]).astype(np.float32)
+        self.W = np.random.normal(scale=np.sqrt(2/in_dim), size=[in_dim, out_dim]).astype(np.float32)
         self.B = np.zeros(out_dim, dtype=np.float32)
 
         self.dW = np.zeros_like(self.W, dtype=np.float32)
@@ -33,15 +33,26 @@ class LinearLayer(Layer):
         self.record = True
 
     def forward(self, x):
-        self.record_cache('x', x) # Shape: [batch_size, in_dim]
-        out = x @ self.W + self.B # Shape: [batch_size, out_dim]
-        return out
+        x_shape = x.shape
+        self.record_cache('x_shape', x_shape)
+
+        x = x.reshape(-1, self.in_dim) # Flatten all but in_dim
+        self.record_cache('x', x)
+
+        out = x @ self.W + self.B
+        return out.reshape(*x_shape[:-1], self.out_dim) # Shape output back
     
     def backward(self, r_grad):
         x = self.cache['x']
-        self.dW = x.T @ r_grad # Shape: [in_dim, out_dim]
+        x_shape = self.cache['x_shape']
+
+        r_grad = r_grad.reshape(-1, self.out_dim)
+        self.dW = x.T @ r_grad
         self.dB = np.sum(r_grad, axis=0) # Sum over all batches
-        return r_grad @ self.W.T # Shape: [batch_size, in_dim]
+        
+        local_grad = r_grad @ self.W.T
+        local_grad = local_grad.reshape(*x_shape)
+        return local_grad
     
     def paras_grads(self):
         return [
@@ -207,13 +218,9 @@ class LSTM(Layer):
         D = in_dim + hidden_dim
         self.W = np.random.normal(scale=np.sqrt(2/D), size=[D, 4 * hidden_dim]).astype(np.float32)
         self.B = np.zeros(4 * hidden_dim, dtype=np.float32)
-        self.Wout = np.random.normal(scale=np.sqrt(2/hidden_dim), size=[hidden_dim, out_dim]).astype(np.float32)
-        self.Bout = np.zeros(out_dim, dtype=np.float32)
         
         self.dW = np.zeros_like(self.W, dtype=np.float32)
         self.dB = np.zeros_like(self.B, dtype=np.float32)
-        self.dWout = np.zeros_like(self.Wout, dtype=np.float32)
-        self.dBout = np.zeros_like(self.Bout, dtype=np.float32)
 
         self.cache = {}
         self.record = True
@@ -265,9 +272,6 @@ class LSTM(Layer):
             # Store
             hidden_states[:, t, :] = h
 
-            # Out
-            outputs[:, t, :] = h @ self.Wout + self.Bout
-
         self.record_cache('concats', concats)
         self.record_cache('forgets', forgets)
         self.record_cache('c_tildes', c_tildes)
@@ -276,7 +280,7 @@ class LSTM(Layer):
         self.record_cache('cell_states', cell_states)
         self.record_cache('hidden_states', hidden_states)
 
-        return outputs
+        return hidden_states
     
     def backward(self, r_grad):
         x = self.cache['x'] # Shape: [batch_size, T, in_dim]
@@ -291,7 +295,7 @@ class LSTM(Layer):
         batch_size, T, hidden_dim = hidden_states.shape
 
         # Zero
-        for g in (self.dW, self.dB, self.dWout, self.dBout):
+        for g in (self.dW, self.dB):
             g.fill(0)
 
         local_grad = np.zeros_like(x, dtype=np.float32)
@@ -309,7 +313,7 @@ class LSTM(Layer):
             C_tminus1 = cell_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
             h = hidden_states[:, t, :]
 
-            dh = r_grad[:, t, :] @ self.Wout.T + dh_tplus1
+            dh = r_grad[:, t, :] + dh_tplus1
             dC = dh * output_gate * (1 - np.tanh(C)**2) + dC_tplus1
 
             dc_tilde = dC * update_gate
@@ -322,8 +326,6 @@ class LSTM(Layer):
 
             self.dW += hx.T @ dz
             self.dB += np.sum(dz, axis=0)
-            self.dWout += h.T @ r_grad[:, t, :]
-            self.dBout += np.sum(r_grad[:, t, :], axis=0)
 
             dhx = dz @ self.W.T
             dC_tplus1 = dC * forget
@@ -337,11 +339,9 @@ class LSTM(Layer):
         return [
             (self.W, self.dW),
             (self.B, self.dB),
-            (self.Wout, self.dWout),
-            (self.Bout, self.dBout),
         ]
 
     def count_parameters(self):
-        return self.W.size + self.B.size + self.Wout.size + self.Bout.size
+        return self.W.size + self.B.size
 
 
