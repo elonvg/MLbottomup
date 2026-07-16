@@ -225,8 +225,8 @@ class LSTM(Layer):
         # Init activations
         concats = np.zeros((batch_size, T, self.in_dim + self.hidden_dim)).astype(np.float32)
         forgets = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
-        candidates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
-        input_gates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        c_tildes = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        update_gates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
         output_gates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
         # Init hidden states and output
         cell_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
@@ -250,12 +250,12 @@ class LSTM(Layer):
             forgets[:, t, :] = forget
 
             # "Input" / Update cell
-            candidate = np.tanh(zc)
-            input_gate = _sigmoid(zu)
-            C = Cf + candidate * input_gate
+            c_tilde = np.tanh(zc)
+            update_gate = _sigmoid(zu)
+            C = Cf + c_tilde * update_gate
             # Store
-            input_gates[:, t, :] = input_gate
-            candidates[:, t, :] = candidate
+            update_gates[:, t, :] = update_gate
+            c_tildes[:, t, :] = c_tilde
             cell_states[:, t, :] = C
 
             # "Output" / Compute state
@@ -270,8 +270,8 @@ class LSTM(Layer):
 
         self.record_cache('concats', concats)
         self.record_cache('forgets', forgets)
-        self.record_cache('candidates', candidates)
-        self.record_cache('input_gates', input_gates)
+        self.record_cache('c_tildes', c_tildes)
+        self.record_cache('update_gates', update_gates)
         self.record_cache('output_gates', output_gates)
         self.record_cache('cell_states', cell_states)
         self.record_cache('hidden_states', hidden_states)
@@ -279,12 +279,11 @@ class LSTM(Layer):
         return outputs
     
     def backward(self, r_grad):
-        # Fetch
         x = self.cache['x'] # Shape: [batch_size, T, in_dim]
         concats = self.cache['concats']
         forgets = self.cache['forgets']
-        candidates = self.cache['candidates']
-        input_gates = self.cache['input_gates']
+        c_tildes = self.cache['c_tildes']
+        update_gates = self.cache['update_gates']
         output_gates = self.cache['output_gates']
         cell_states = self.cache['cell_states']
         hidden_states = self.cache['hidden_states']
@@ -300,10 +299,11 @@ class LSTM(Layer):
         dC_tplus1 = np.zeros([batch_size, hidden_dim], dtype=np.float32)
         dh_tplus1 = np.zeros([batch_size, hidden_dim], dtype=np.float32)
         for t in reversed(range(T)):
+            # Fetch current
             hx = concats[:, t, :]
             forget = forgets[:, t, :]
-            candidate = candidates[:, t, :]
-            input_gate = input_gates[:, t, :]
+            c_tilde = c_tildes[:, t, :]
+            update_gate = update_gates[:, t, :]
             output_gate = output_gates[:, t, :]
             C = cell_states[:, t, :]
             C_tminus1 = cell_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
@@ -312,11 +312,11 @@ class LSTM(Layer):
             dh = r_grad[:, t, :] @ self.Wout.T + dh_tplus1
             dC = dh * output_gate * (1 - np.tanh(C)**2) + dC_tplus1
 
-            dcandidate = dC * input_gate
+            dc_tilde = dC * update_gate
 
             dzf = dC * C_tminus1 * (forget * (1 - forget))
-            dzc = dcandidate * (1 - candidate**2)
-            dzu = dC * candidate * (input_gate * (1 - input_gate))
+            dzc = dc_tilde * (1 - c_tilde**2)
+            dzu = dC * c_tilde * (update_gate * (1 - update_gate))
             dzo = dh * np.tanh(C) * (output_gate * (1 - output_gate))
             dz = np.concatenate([dzf, dzc, dzu, dzo], axis=1)
 
