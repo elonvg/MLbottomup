@@ -65,13 +65,15 @@ class LinearLayer(Layer):
 
 
 class ConvLayer(Layer):
-    def __init__(self, in_channels=1, out_channels=1, kernel_size=3):
+    def __init__(self, in_channels=1, out_channels=1, kernel_size=3, padding=0):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
         self.kernel_size = kernel_size
         self.kernel = np.random.normal(scale=0.01, size=[out_channels, in_channels, kernel_size, kernel_size]).astype(np.float32) # Assumes n x n kernel
         self.bias = np.zeros(out_channels, dtype=np.float32)
+
+        self.padding = kernel_size // 2 if padding == -1 else padding # Set padding to -1 for same size
 
         self.dK_prev = 0
         self.dB_prev = 0
@@ -80,6 +82,10 @@ class ConvLayer(Layer):
         self.record = True
     
     def forward(self, x):
+        p = self.padding
+        if p:
+            x = np.pad(x, ((0, 0), (0, 0), (p, p), (p, p)))
+
         self.record_cache('x', x) # Shape: [batch_size, x_channels, x_rows, x_cols]
 
         windows = sliding_window_view(x, window_shape=(self.kernel_size, self.kernel_size), axis=(2, 3))
@@ -105,7 +111,11 @@ class ConvLayer(Layer):
             for j in range(fm_cols):
                 local_grad[:, :, i:i+self.kernel_size, j:j+self.kernel_size] += np.transpose(np.tensordot(self.kernel, r_grad[:, :, i, j], axes=([0], [1])), (3, 0, 1, 2))
 
-        return local_grad# Shape: [batch_size, x_channeles, x_rows, x_cols]
+        p = self.padding
+        if p:
+            local_grad = local_grad[:, :, p:-p, p:-p] # Drop padding
+
+        return local_grad # Shape: [batch_size, x_channeles, x_rows, x_cols]
     
     def paras_grads(self):
         return [
@@ -210,10 +220,9 @@ def _sigmoid(z):
     return 1/(1+np.exp(-z))
 
 class LSTM(Layer):
-    def __init__(self, in_dim, hidden_dim, out_dim):
+    def __init__(self, in_dim, hidden_dim):
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
-        self.out_dim = out_dim
 
         D = in_dim + hidden_dim
         self.W = np.random.normal(scale=np.sqrt(2/D), size=[D, 4 * hidden_dim]).astype(np.float32)
@@ -230,24 +239,25 @@ class LSTM(Layer):
         batch_size, T, in_dim = x.shape
 
         # Init activations
-        concats = np.zeros((batch_size, T, self.in_dim + self.hidden_dim)).astype(np.float32)
-        forgets = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
-        c_tildes = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
-        update_gates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
-        output_gates = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
+        concats = np.zeros((batch_size, T, self.in_dim + self.hidden_dim), dtype=np.float32)
+        forgets = np.zeros((batch_size, T, self.hidden_dim), dtype=np.float32)
+        c_tildes = np.zeros((batch_size, T, self.hidden_dim), dtype=np.float32)
+        update_gates = np.zeros((batch_size, T, self.hidden_dim), dtype=np.float32)
+        output_gates = np.zeros((batch_size, T, self.hidden_dim), dtype=np.float32)
         # Init hidden states and output
-        cell_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
-        hidden_states = np.zeros((batch_size, T, self.hidden_dim)).astype(np.float32)
-        outputs = np.zeros((batch_size, T, self.out_dim)).astype(np.float32)
+        cell_states = np.zeros((batch_size, T, self.hidden_dim), dtype=np.float32)
+        cell_tanhs = np.zeros((batch_size, T, self.hidden_dim), dtype=np.float32)
+        hidden_states = np.zeros((batch_size, T, self.hidden_dim), dtype=np.float32)
 
         for t in range(T):
             C_prev = cell_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
             h_prev = hidden_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
 
-            hx = np.concatenate((h_prev, x[:, t, :]), axis=1)
-            concats[:, t, :] = hx
-            z = hx @ self.W + self.B # Shape: [batch_size, 4 * hidden_dim]
+            # hx = np.concatenate((h_prev, x[:, t, :]), axis=1)
             H = self.hidden_dim
+            concats[:, t, :H] = h_prev
+            concats[:, t, H:] = x[:, t, :]
+            z = concats[:, t, :] @ self.W + self.B # Shape: [batch_size, 4 * hidden_dim]
             zf, zc, zu, zo = z[:, 0:H], z[:, H:2*H], z[:, 2*H:3*H], z[:, 3*H:4*H]
 
             # "Forget"
@@ -268,7 +278,9 @@ class LSTM(Layer):
             # "Output" / Compute state
             output_gate = _sigmoid(zo)
             output_gates[:, t, :] = output_gate
-            h = output_gate * np.tanh(C)
+            C_tanh = np.tanh(C)
+            cell_tanhs[:, t, :] = C_tanh
+            h = output_gate * C_tanh
             # Store
             hidden_states[:, t, :] = h
 
@@ -278,6 +290,7 @@ class LSTM(Layer):
         self.record_cache('update_gates', update_gates)
         self.record_cache('output_gates', output_gates)
         self.record_cache('cell_states', cell_states)
+        self.record_cache('cell_tanhs', cell_tanhs)
         self.record_cache('hidden_states', hidden_states)
 
         return hidden_states
@@ -290,9 +303,11 @@ class LSTM(Layer):
         update_gates = self.cache['update_gates']
         output_gates = self.cache['output_gates']
         cell_states = self.cache['cell_states']
+        cell_tanhs = self.cache['cell_tanhs']
         hidden_states = self.cache['hidden_states']
 
         batch_size, T, hidden_dim = hidden_states.shape
+        H = hidden_dim
 
         # Zero
         for g in (self.dW, self.dB):
@@ -302,6 +317,7 @@ class LSTM(Layer):
 
         dC_tplus1 = np.zeros([batch_size, hidden_dim], dtype=np.float32)
         dh_tplus1 = np.zeros([batch_size, hidden_dim], dtype=np.float32)
+        dz = np.zeros([batch_size, 4 * hidden_dim], dtype=np.float32)
         for t in reversed(range(T)):
             # Fetch current
             hx = concats[:, t, :]
@@ -310,19 +326,19 @@ class LSTM(Layer):
             update_gate = update_gates[:, t, :]
             output_gate = output_gates[:, t, :]
             C = cell_states[:, t, :]
+            C_tanh = cell_tanhs[:, t, :]
             C_tminus1 = cell_states[:, t-1, :] if t > 0 else np.zeros((batch_size, self.hidden_dim), dtype=np.float32)
             h = hidden_states[:, t, :]
 
             dh = r_grad[:, t, :] + dh_tplus1
-            dC = dh * output_gate * (1 - np.tanh(C)**2) + dC_tplus1
+            dC = dh * output_gate * (1 - C_tanh**2) + dC_tplus1
 
             dc_tilde = dC * update_gate
 
-            dzf = dC * C_tminus1 * (forget * (1 - forget))
-            dzc = dc_tilde * (1 - c_tilde**2)
-            dzu = dC * c_tilde * (update_gate * (1 - update_gate))
-            dzo = dh * np.tanh(C) * (output_gate * (1 - output_gate))
-            dz = np.concatenate([dzf, dzc, dzu, dzo], axis=1)
+            dz[:, 0:H] = dC * C_tminus1 * (forget * (1 - forget)) # dzf
+            dz[:, H:2*H] = dc_tilde * (1 - c_tilde**2) #dzc
+            dz[:, 2*H:3*H] = dC * c_tilde * (update_gate * (1 - update_gate)) #dzu
+            dz[:, 3*H:4*H] = dh * C_tanh * (output_gate * (1 - output_gate)) #dzo
 
             self.dW += hx.T @ dz
             self.dB += np.sum(dz, axis=0)
